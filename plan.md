@@ -20,10 +20,17 @@ neutral, and the assasssin that adds to 100%
 round
 
 ## Data Models
-- 5x5 grid of words
-- Each spymaster hints
-- Each operative guesses
-- Choices for each round 
+- 5x5 grid of cards 
+- Card 
+    - word - a string of the card's word
+    - identity - red agent, blue agent, neutral or assassin 
+    - revealed - a bool indicating whether it has been revealed or not 
+- Global variable game state of the current turn - red/blue, spymaster/operative
+- List of hints for each team
+- Hint
+    - The clue word 
+    - The number given by the spymaster 
+    - A list of guesses (cards)
 
 ## Technical components 
 - Backend/API - FastAPI, python
