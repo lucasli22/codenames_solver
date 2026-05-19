@@ -35,4 +35,5 @@ round
 ## Technical components 
 - Backend/API - FastAPI, python
 - Frontend/UI - React
-- Scoring Algorithm - [Sentence Transformers](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html)
+- Scoring Algorithm - [Sentence Transformer](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html)
+- English corpus for spymaster scoring - [Princeton Wordnet](https://www.nltk.org/howto/wordnet.html)

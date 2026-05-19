@@ -7,22 +7,22 @@ ASSASSIN_WEIGHTING = 2
 
 TEST_WORDS = [
     Card(word=w, identity=None, is_revealed=False) for w in [
-        "ocean", "lantern", "velocity", "forest", "quantum", "harmony",
-        "puzzle", "crystal", "volcano", "compass", "galaxy", "shadow",
-        "avalanche", "phoenix", "library", "whisper", "meteor", "canyon",
-        "spectrum", "pirate", "castle", "nebula", "thunder", "voyage",
-        "paradox"
+        "canada", "trip", "beat", "jam", "triangle", "root",
+        "forest", "ray", "sock", "genius", "skyscraper", "mail",
+        "lawyer", "stream", "flute", "worm", "mars", "witch",
+        "torch", "jack", "printer", "smuggler", "kid", "vacuum",
+        "cloak"
     ]
 ]
 
 TEST_ALLY_HINTS = [
     Hint(clue="physics", num=3, guesses=[]),
-    Hint(clue="books", num=2, guesses=[]),
+    Hint(clue="light", num=3, guesses=[]),
 ]
 
 TEST_ENEMY_HINTS = [
-    Hint(clue="sea", num=3, guesses=[]),
-    Hint(clue="voice", num=2, guesses=[]),
+    Hint(clue="vacation", num=3, guesses=[]),
+    Hint(clue="instrument", num=1, guesses=[]),
 ]
 
 
