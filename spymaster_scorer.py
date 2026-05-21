@@ -8,13 +8,31 @@ model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 corpus = set()
 
 TEST_WORDS = [
-    Card(word=w, identity=None, is_revealed=False) for w in [
-        "canada", "trip", "beat", "jam", "triangle", "root",
-        "forest", "ray", "sock", "genius", "skyscraper", "mail",
-        "lawyer", "stream", "flute", "worm", "mars", "witch",
-        "torch", "jack", "printer", "smuggler", "kid", "vacuum",
-        "cloak"
-    ]
+    Card(word="canada",     identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="trip",       identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="beat",       identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="jam",        identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="triangle",   identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="root",       identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="forest",     identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="ray",        identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="sock",       identity=Identity.RED_AGENT,  is_revealed=False),
+    Card(word="genius",     identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="skyscraper", identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="mail",       identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="lawyer",     identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="stream",     identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="flute",      identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="worm",       identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="mars",       identity=Identity.BLUE_AGENT, is_revealed=False),
+    Card(word="witch",      identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="torch",      identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="jack",       identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="printer",    identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="smuggler",   identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="kid",        identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="vacuum",     identity=Identity.NEUTRAL,    is_revealed=False),
+    Card(word="cloak",      identity=Identity.ASSASSIN,   is_revealed=False),
 ]
 
 TEST_PAST_HINTS = [
@@ -23,12 +41,18 @@ TEST_PAST_HINTS = [
 
 def init_corpus(word_list: list[str]) -> list[str]:
     word_set = set(word_list)
+    root_set = {wn.morphy(w) or w for w in word_set}
+
     for synset in wn.all_eng_synsets():
         for lemma in synset.lemmas():
             word = lemma.name()
-            if "_" not in word and word not in word_set and lemma.count() > 1:
-                corpus.add(word.lower())
-    print(len(corpus))
+            word_lower = word.lower()
+            root = wn.morphy(word_lower) or word_lower
+            if ("_" not in word
+                    and word_lower not in word_set
+                    and root not in root_set
+                    and lemma.count() > 1):
+                corpus.add(word_lower)
 
     return list(corpus)
 def get_active_ally_words(words: list[Card], past_hints: list[Hint], identity: Identity,
@@ -40,8 +64,8 @@ def get_active_ally_words(words: list[Card], past_hints: list[Hint], identity: I
         top_words = top_k_by_similarity(hint.num, board_similarities, board_words)
         claimed.update(word for score, word in top_words if score > SAFETY_THRESHOLD)
 
-    ally_words = [w.word for w in words or TEST_WORDS if w.identity == identity]
-    active_ally_words = [w for w in ally_words or TEST_WORDS if w not in claimed 
+    ally_words = [w for w in words or TEST_WORDS if w.identity == identity]
+    active_ally_words = [w.word for w in ally_words or TEST_WORDS if w.word not in claimed 
                          and not w.is_revealed]
 
     return active_ally_words
@@ -51,6 +75,18 @@ def get_active_enemy_words(words: list[Card], identity: Identity) -> list[str]:
                           and w.identity != identity]
     return active_enemy_words
 
+def top_k_hints(k: int, ally_sim: list[float], enemy_sim: list[float], corpus_list: list[str]):
+    scores = []
+    n = len(ally_sim)
+
+    for i in range(n):
+        ally_min = min(sorted(ally_sim[i], reverse=True)[:k])
+        enemy_max = max(enemy_sim[i])
+        scores.append(ally_min - enemy_max)
+
+    paired = [(score, word) for score, word in zip(scores, corpus_list)]
+    return max(paired)
+    
 def spymaster_scorer(words: list[Card], past_hints: list[Hint], identity: Identity):
     board_words = [w.word for w in words or TEST_WORDS]
     corpus_list = init_corpus(board_words)
@@ -63,12 +99,24 @@ def spymaster_scorer(words: list[Card], past_hints: list[Hint], identity: Identi
     active_enemy_words = get_active_enemy_words(words, identity)
     enemy_embeddings = model.encode(active_enemy_words)
 
-    ally_sim_matrix = model.similarity(ally_embeddings, corpus_embeddings)
-    enemy_sim_matrix = model.similarity(enemy_embeddings, corpus_embeddings)
+    ally_sim_matrix = model.similarity(corpus_embeddings, ally_embeddings).numpy()
+    enemy_sim_matrix = model.similarity(corpus_embeddings, enemy_embeddings).numpy()
 
-        
+    results = {}
+    for k in range(1, len(active_ally_words) + 1):
+        best = top_k_hints(k, ally_sim_matrix, enemy_sim_matrix, corpus_list)
+        if best and best[0] > 0:
+            results[k] = best
 
-    
+    return results
+
+
+def print_results(results: dict, identity: Identity):
+    print(f"\n=== Spymaster Hints ({identity.value}) ===")
+    for k, (score, hint) in results.items():
+        print(f"  {hint:<15} {k}  (score: {float(score):.4f})")
+
 
 if __name__ == "__main__":
-    spymaster_scorer([], [], Identity.RED_AGENT)
+    results = spymaster_scorer([], [], Identity.RED_AGENT)
+    print_results(results, Identity.RED_AGENT)
