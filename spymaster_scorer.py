@@ -4,6 +4,10 @@ from nltk.corpus import wordnet as wn
 from operative_scorer import top_k_by_similarity
 
 SAFETY_THRESHOLD = 0.5
+ENEMY_WEIGHT = 1.0
+NEUTRAL_WEIGHT = 0.5
+ASSASSIN_WEIGHT = 3.0
+
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 corpus = set()
 
@@ -70,19 +74,30 @@ def get_active_ally_words(words: list[Card], past_hints: list[Hint], identity: I
 
     return active_ally_words
 
-def get_active_enemy_words(words: list[Card], identity: Identity) -> list[str]:
-    active_enemy_words = [w.word for w in words or TEST_WORDS if not w.is_revealed 
-                          and w.identity != identity]
-    return active_enemy_words
+def get_active_non_ally_words(words: list[Card], identity: Identity) -> tuple[list[str], list[str], list[str]]:
+    enemy_identity = Identity.RED_AGENT if identity == Identity.BLUE_AGENT else Identity.BLUE_AGENT
+    active = [w for w in words or TEST_WORDS if w.is_revealed == False]
 
-def top_k_hints(k: int, ally_sim: list[float], enemy_sim: list[float], corpus_list: list[str]):
+    enemies = [w.word for w in active if w.identity == enemy_identity]
+    neutrals = [w.word for w in active if w.identity == Identity.NEUTRAL]
+    asassins = [w.word for w in active if w.identity == Identity.ASSASSIN]
+
+    return enemies, neutrals, asassins
+
+def top_k_hints(k: int, ally_sim: list[float], enemy_sim: list[float], 
+                neutral_sim: list[float], assassin_sim: list[float], 
+                corpus_list: list[str]):
     scores = []
-    n = len(ally_sim)
 
-    for i in range(n):
-        ally_min = min(sorted(ally_sim[i], reverse=True)[:k])
-        enemy_max = max(enemy_sim[i])
-        scores.append(ally_min - enemy_max)
+    for i in range(len(ally_sim)):
+        top_k_sims = sorted(ally_sim[i], reverse=True)[:k]
+        penalty_per_word = (
+            (ENEMY_WEIGHT    * max(enemy_sim[i])    if enemy_sim    is not None else 0) +
+            (NEUTRAL_WEIGHT  * max(neutral_sim[i])  if neutral_sim  is not None else 0) +
+            (ASSASSIN_WEIGHT * max(assassin_sim[i]) if assassin_sim is not None else 0)
+        )
+        scores.append(sum(top_k_sims) - k * penalty_per_word)
+
 
     paired = [(score, word) for score, word in zip(scores, corpus_list)]
     return max(paired)
@@ -96,15 +111,21 @@ def spymaster_scorer(words: list[Card], past_hints: list[Hint], identity: Identi
     active_ally_words = get_active_ally_words(words, past_hints, identity, 
                                               board_words, board_embeddings)
     ally_embeddings = model.encode(active_ally_words)
-    active_enemy_words = get_active_enemy_words(words, identity)
-    enemy_embeddings = model.encode(active_enemy_words)
 
-    ally_sim_matrix = model.similarity(corpus_embeddings, ally_embeddings).numpy()
-    enemy_sim_matrix = model.similarity(corpus_embeddings, enemy_embeddings).numpy()
+    enemy_words, neutral_words, asassin_words = get_active_non_ally_words(words, identity)
+    enemy_embeddings = model.encode(enemy_words) if enemy_words else None
+    neutral_embeddings = model.encode(neutral_words) if neutral_words else None
+    asassin_embeddings = model.encode(asassin_words) if asassin_words else None
+    
+    ally_sim_matrix     = model.similarity(corpus_embeddings, ally_embeddings).numpy()
+    enemy_sim_matrix    = model.similarity(corpus_embeddings, enemy_embeddings).numpy()    if enemy_embeddings   is not None else None
+    neutral_sim_matrix  = model.similarity(corpus_embeddings, neutral_embeddings).numpy()  if neutral_embeddings is not None else None
+    assassin_sim_matrix = model.similarity(corpus_embeddings, asassin_embeddings).numpy()  if asassin_embeddings is not None else None
+
 
     results = {}
     for k in range(1, len(active_ally_words) + 1):
-        best = top_k_hints(k, ally_sim_matrix, enemy_sim_matrix, corpus_list)
+        best = top_k_hints(k, ally_sim_matrix, enemy_sim_matrix, neutral_sim_matrix, assassin_sim_matrix, corpus_list)
         if best and best[0] > 0:
             results[k] = best
 
