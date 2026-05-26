@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from models import Game, Identity, GameState, Card, CreateSpymasterGameRequest, CreateOperativeGameRequest
-
+from models import Game, Identity, GameState, Card, Hint, CreateSpymasterGameRequest, CreateOperativeGameRequest
+from operative_scorer import operative_scorer
+from spymaster_scorer import spymaster_scorer
 N_ROWS = 5
 N_COLS = 5
 
@@ -57,3 +58,44 @@ def create_game_operative(request: CreateOperativeGameRequest):
         board.append(row)
 
     return Game(board=board, game_state=request.first_team, red_hints=[], blue_hints=[])
+
+@router.post("/game/score/operative")
+def get_score_operative(game: Game):
+    if game.game_state == GameState.RED_OPERATIVE:
+        ally_hints = game.red_hints
+        enemey_hints = game.blue_hints
+    elif game.game_state == GameState.BLUE_OPERATIVE:
+        ally_hints = game.blue_hints
+        enemey_hints = game.red_hints
+    else:
+        raise HTTPException(status_code=400, detail="game_state must be a red or blue" \
+        "operative state") 
+    
+    words = [card for row in game.board for card in row]
+    adjusted_matrix, results = operative_scorer(words, ally_hints, enemey_hints)
+
+    return {
+        "rankings": [{"word": w, "score": s} for s, w in adjusted_matrix],
+        "per_hint": {clue: [{"word": w, "score": s} for s, w in matches] for clue, matches in results.items()}
+    }
+
+
+@router.post("/game/score/spymaster")
+def get_score_spymaster(game: Game):
+    if game.game_state == GameState.RED_SPYMASTER:
+        past_hints = game.red_hints
+        identity = Identity.RED_AGENT
+    elif game.game_state == GameState.BLUE_SPYMASTER:
+        past_hints = game.blue_hints
+        identity = Identity.BLUE_AGENT
+    else:
+        raise HTTPException(status_code=400, detail="game_state must be a red or blue" \
+        "spymaster state")
+    
+    words = [card for row in game.board for card in row]
+    results = spymaster_scorer(words, past_hints, identity)
+
+    return {
+        "identity": identity,
+        "clue": [{"hint": hint, "k": k, "utility": utility} for utility, hint, k in results]
+    }

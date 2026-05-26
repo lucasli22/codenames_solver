@@ -6,23 +6,38 @@ ENEMY_WEIGHTING = 1
 ASSASSIN_WEIGHTING = 2
 
 TEST_WORDS = [
-    Card(word=w, identity=None, is_revealed=False) for w in [
-        "canada", "trip", "beat", "jam", "triangle", "root",
-        "forest", "ray", "sock", "genius", "skyscraper", "mail",
-        "lawyer", "stream", "flute", "worm", "mars", "witch",
-        "torch", "jack", "printer", "smuggler", "kid", "vacuum",
-        "cloak"
-    ]
+    Card(word="canada",     identity = None,  is_revealed=False),
+    Card(word="trip",       identity = None,  is_revealed=False),
+    Card(word="beat",       identity = None,  is_revealed=False),
+    Card(word="jam",        identity = None,  is_revealed=False),
+    Card(word="triangle",   identity = None,  is_revealed=False),
+    Card(word="root",       identity = None,  is_revealed=False),
+    Card(word="forest",     identity = None,  is_revealed=False),
+    Card(word="ray",        identity = None,  is_revealed=False),
+    Card(word="sock",       identity = None,  is_revealed=False),
+    Card(word="genius",     identity = None, is_revealed=False),
+    Card(word="skyscraper", identity = None, is_revealed=False),
+    Card(word="mail",       identity = None, is_revealed=False),
+    Card(word="lawyer",     identity = None, is_revealed=False),
+    Card(word="stream",     identity = None, is_revealed=False),
+    Card(word="flute",      identity = None, is_revealed=False),
+    Card(word="worm",       identity = None, is_revealed=False),
+    Card(word="mars",       identity = None, is_revealed=False),
+    Card(word="witch",      identity = None,    is_revealed=False),
+    Card(word="torch",      identity = None,    is_revealed=False),
+    Card(word="jack",       identity = None,    is_revealed=False),
+    Card(word="printer",    identity = None,    is_revealed=False),
+    Card(word="smuggler",   identity = None,    is_revealed=False),
+    Card(word="kid",        identity = None,    is_revealed=False),
+    Card(word="vacuum",     identity = None,    is_revealed=False),
+    Card(word="cloak",      identity = None,   is_revealed=False),
 ]
 
 TEST_ALLY_HINTS = [
-    Hint(clue="physics", num=3, guesses=[]),
-    Hint(clue="light", num=3, guesses=[]),
+    Hint(clue="chuck", num=3, guesses=[]),
 ]
 
 TEST_ENEMY_HINTS = [
-    Hint(clue="vacation", num=3, guesses=[]),
-    Hint(clue="instrument", num=1, guesses=[]),
 ]
 
 
@@ -56,9 +71,14 @@ def operative_scorer(words: list[Card], ally_hints: list[Hint], enemy_hints: lis
     ally_sim_matrix = get_similarity_matrix(board_embeddings, ally_clue_list)
 
     enemy_clue_list = [hint.clue for hint in enemy_hints or TEST_ENEMY_HINTS]
-    enemy_sim_matrix = get_similarity_matrix(board_embeddings, enemy_clue_list)
-
-    adjusted_matrix = adjust_similarity(ally_sim_matrix, enemy_sim_matrix, word_list)
+    if enemy_clue_list:
+        enemy_sim_matrix = get_similarity_matrix(board_embeddings, enemy_clue_list)
+        adjusted_matrix = adjust_similarity(ally_sim_matrix, enemy_sim_matrix, word_list)
+    else:
+        adjusted_matrix = sorted(
+            [(max(ally_sim_matrix[i]), word_list[i]) for i in range(len(word_list))],
+            reverse=True
+        )
 
     results = {}
     for i, hint in enumerate(ally_hints or TEST_ALLY_HINTS):

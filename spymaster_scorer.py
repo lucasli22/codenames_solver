@@ -136,6 +136,12 @@ def spymaster_scorer(words: list[Card], past_hints: list[Hint], identity: Identi
     board_words = [w.word for w in words or TEST_WORDS]
     corpus_list, corpus_embeddings = init_corpus(board_words)
 
+    used_clues = {h.clue.lower() for h in (past_hints or TEST_PAST_HINTS)}
+    if used_clues:
+        mask = np.array([w not in used_clues for w in corpus_list])
+        corpus_list = [w for w, keep in zip(corpus_list, mask) if keep]
+        corpus_embeddings = corpus_embeddings[mask]
+    
     board_embeddings = model.encode(board_words)
     active_ally_words = get_active_ally_words(words, past_hints, identity,
                                               board_words, board_embeddings)
