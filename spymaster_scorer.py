@@ -1,15 +1,31 @@
+import os
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from models import Card, Hint, Identity
 from nltk.corpus import wordnet as wn
 from operative_scorer import top_k_by_similarity
 
+CORPUS_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus_cache.npz")
+
 SAFETY_THRESHOLD = 0.5
-ENEMY_WEIGHT = 1.0
-NEUTRAL_WEIGHT = 0.5
-ASSASSIN_WEIGHT = 3.0
+
+# Logistic transform: maps cosine similarity -> probability the operative would pick that word.
+SIGMOID_A = 12
+SIGMOID_B = 4.8
+
+# Blanton's weight scheme (per-word contributions to utility)
+ALLY_WEIGHT     =   1.0
+ENEMY_WEIGHT    =  -1.0
+NEUTRAL_WEIGHT  =  -0.04
+ASSASSIN_WEIGHT =  -5.0
+
+# A board word is "covered" by a clue if its probability exceeds this threshold.
+COVERAGE_THRESHOLD = 0.5
+
+# Number of top hints to display
+TOP_N = 15
 
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-corpus = set()
 
 TEST_WORDS = [
     Card(word="canada",     identity=Identity.RED_AGENT,  is_revealed=False),
@@ -43,22 +59,43 @@ TEST_PAST_HINTS = [
     Hint(clue="physics", num=3, guesses=[]),
 ]
 
-def init_corpus(word_list: list[str]) -> list[str]:
-    word_set = set(word_list)
-    root_set = {wn.morphy(w) or w for w in word_set}
-
+def _build_corpus_cache():
+    print(f"Building corpus cache at {CORPUS_CACHE_PATH} (one-time, may take a few minutes)...")
+    corpus = set()
     for synset in wn.all_eng_synsets():
         for lemma in synset.lemmas():
             word = lemma.name()
             word_lower = word.lower()
-            root = wn.morphy(word_lower) or word_lower
-            if ("_" not in word
-                    and word_lower not in word_set
-                    and root not in root_set
-                    and lemma.count() > 1):
+            if "_" not in word and lemma.count() > 1:
                 corpus.add(word_lower)
 
-    return list(corpus)
+    words = sorted(corpus)
+    embeddings = model.encode(words, show_progress_bar=True)
+    np.savez_compressed(CORPUS_CACHE_PATH, words=np.array(words), embeddings=embeddings)
+    print(f"Cached {len(words)} words.")
+
+
+def init_corpus(word_list: list[str]):
+    """Return (corpus_words, corpus_embeddings) with board words and their morphy roots removed."""
+    if not os.path.exists(CORPUS_CACHE_PATH):
+        _build_corpus_cache()
+
+    data = np.load(CORPUS_CACHE_PATH, allow_pickle=True)
+    cached_words = data["words"]
+    cached_embeddings = data["embeddings"]
+
+    word_set = set(word_list)
+    root_set = {wn.morphy(w) or w for w in word_set}
+
+    mask = np.array([
+        w not in word_set and (wn.morphy(w) or w) not in root_set
+        for w in cached_words
+    ])
+
+    filtered_words = [str(w) for w, keep in zip(cached_words, mask) if keep]
+    filtered_embeddings = cached_embeddings[mask]
+    return filtered_words, filtered_embeddings
+
 def get_active_ally_words(words: list[Card], past_hints: list[Hint], identity: Identity,
                           board_words: list[str], board_embeddings) -> list[str]:
     claimed = set() 
@@ -84,58 +121,60 @@ def get_active_non_ally_words(words: list[Card], identity: Identity) -> tuple[li
 
     return enemies, neutrals, asassins
 
-def top_k_hints(k: int, ally_sim: list[float], enemy_sim: list[float], 
-                neutral_sim: list[float], assassin_sim: list[float], 
-                corpus_list: list[str]):
-    scores = []
-
-    for i in range(len(ally_sim)):
-        top_k_sims = sorted(ally_sim[i], reverse=True)[:k]
-        penalty_per_word = (
-            (ENEMY_WEIGHT    * max(enemy_sim[i])    if enemy_sim    is not None else 0) +
-            (NEUTRAL_WEIGHT  * max(neutral_sim[i])  if neutral_sim  is not None else 0) +
-            (ASSASSIN_WEIGHT * max(assassin_sim[i]) if assassin_sim is not None else 0)
-        )
-        scores.append(sum(top_k_sims) - k * penalty_per_word)
+def sigmoid(x):
+    return 1 / (1 + np.exp(-(SIGMOID_A * x - SIGMOID_B)))
 
 
-    paired = [(score, word) for score, word in zip(scores, corpus_list)]
-    return max(paired)
-    
+def weighted_prob_sum(corpus_embeddings, target_embeddings, weight: float):
+    if target_embeddings is None:
+        return np.zeros(corpus_embeddings.shape[0])
+    sim_matrix = model.similarity(corpus_embeddings, target_embeddings).numpy()
+    return weight * sigmoid(sim_matrix).sum(axis=1)
+
+
 def spymaster_scorer(words: list[Card], past_hints: list[Hint], identity: Identity):
     board_words = [w.word for w in words or TEST_WORDS]
-    corpus_list = init_corpus(board_words)
-    corpus_embeddings = model.encode(corpus_list)
+    corpus_list, corpus_embeddings = init_corpus(board_words)
 
     board_embeddings = model.encode(board_words)
-    active_ally_words = get_active_ally_words(words, past_hints, identity, 
+    active_ally_words = get_active_ally_words(words, past_hints, identity,
                                               board_words, board_embeddings)
     ally_embeddings = model.encode(active_ally_words)
 
-    enemy_words, neutral_words, asassin_words = get_active_non_ally_words(words, identity)
-    enemy_embeddings = model.encode(enemy_words) if enemy_words else None
-    neutral_embeddings = model.encode(neutral_words) if neutral_words else None
-    asassin_embeddings = model.encode(asassin_words) if asassin_words else None
-    
-    ally_sim_matrix     = model.similarity(corpus_embeddings, ally_embeddings).numpy()
-    enemy_sim_matrix    = model.similarity(corpus_embeddings, enemy_embeddings).numpy()    if enemy_embeddings   is not None else None
-    neutral_sim_matrix  = model.similarity(corpus_embeddings, neutral_embeddings).numpy()  if neutral_embeddings is not None else None
-    assassin_sim_matrix = model.similarity(corpus_embeddings, asassin_embeddings).numpy()  if asassin_embeddings is not None else None
+    enemies, neutrals, assassins = get_active_non_ally_words(words, identity)
+    enemy_embeddings    = model.encode(enemies)   if enemies   else None
+    neutral_embeddings  = model.encode(neutrals)  if neutrals  else None
+    assassin_embeddings = model.encode(assassins) if assassins else None
 
+    # Utility = Σ weight(c) * sigmoid(sim(candidate, c)) for every board word c.
+    # No top-k slicing: the math itself decides which words contribute meaningfully.
+    ally_score     = weighted_prob_sum(corpus_embeddings, ally_embeddings,     ALLY_WEIGHT)
+    enemy_score    = weighted_prob_sum(corpus_embeddings, enemy_embeddings,    ENEMY_WEIGHT)
+    neutral_score  = weighted_prob_sum(corpus_embeddings, neutral_embeddings,  NEUTRAL_WEIGHT)
+    assassin_score = weighted_prob_sum(corpus_embeddings, assassin_embeddings, ASSASSIN_WEIGHT)
 
-    results = {}
-    for k in range(1, len(active_ally_words) + 1):
-        best = top_k_hints(k, ally_sim_matrix, enemy_sim_matrix, neutral_sim_matrix, assassin_sim_matrix, corpus_list)
-        if best and best[0] > 0:
-            results[k] = best
+    utilities = ally_score + enemy_score + neutral_score + assassin_score
+
+    # Implicit k per candidate: count of ally words above the coverage threshold.
+    ally_sim_matrix = model.similarity(corpus_embeddings, ally_embeddings).numpy()
+    ally_probs = sigmoid(ally_sim_matrix)
+    implicit_k = (ally_probs > COVERAGE_THRESHOLD).sum(axis=1)
+
+    order = np.argsort(-utilities)
+    results = []
+    for idx in order[:TOP_N]:
+        if utilities[idx] <= 0:
+            break
+        results.append((float(utilities[idx]), corpus_list[idx], int(implicit_k[idx])))
 
     return results
 
 
-def print_results(results: dict, identity: Identity):
+def print_results(results: list, identity: Identity):
     print(f"\n=== Spymaster Hints ({identity.value}) ===")
-    for k, (score, hint) in results.items():
-        print(f"  {hint:<15} {k}  (score: {float(score):.4f})")
+    print(f"  {'hint':<15} {'k':>3}   utility")
+    for utility, hint, k in results:
+        print(f"  {hint:<15} {k:>3}   {utility:.4f}")
 
 
 if __name__ == "__main__":
