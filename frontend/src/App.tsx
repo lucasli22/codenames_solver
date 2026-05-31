@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "./api";
 
 const identityColors: Record<string, string> = {
   red_agent: "#c0392b",
@@ -63,23 +64,70 @@ function Square({ card, onChange }: { card: CardState; onChange: (changes: Parti
   );
 }
 
-function Board({ role }) {
+function Board({ role, colour, firstTeam }) {
   const [cards, setCards] = useState(Array(25).fill(null).map(() => ({
     word: "", identity: null, is_revealed: false,
   })));
   const [showWarning, setShowWarning] = useState(false);
+  const [game, setGame] = useState(null);
+  const [redHints, setRedHints] = useState<{clue: string, num: number}[]>([]);
+  const [blueHints, setBlueHints] = useState<{clue: string, num: number}[]>([]);
+  const [clueInput, setClueInput] = useState("");
+  const [numInput, setNumInput] = useState(1);
+  const [currentTurn, setCurrentTurn] = useState<"Red" | "Blue" | null>(null);
+
+  useEffect(() => {
+    setCurrentTurn(firstTeam);
+  }, [firstTeam]);
+
+  function addHint() {
+    const hint = { clue: clueInput, num: numInput };
+    if (!clueInput) return;
+    if (!(/^[a-zA-Z]+$/.test(clueInput))) return;
+    
+    if (currentTurn == "Red") {
+      setRedHints([...redHints, hint]);
+    } else {
+      setBlueHints([...blueHints, hint]);
+    }
+
+    setClueInput("");
+    setCurrentTurn(currentTurn === "Red" ? "Blue" : "Red");
+  }
+
 
   function handleInput(i: number, changes: Partial<typeof cards[0]>) {
     setCards(cards.map((card, index) => index === i ? { ...card, ...changes } : card));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const valid = role === "Spymaster" ? cards.every(card => card.word !== "" && card.identity != null) : 
     cards.every(card => card.word !== "");
+
     if (valid) {
       setShowWarning(false);
       if (role === "Spymaster") {
+        const newGame = await api.createSpymasterGame(cards);
+        if (colour === "Red") {
+          newGame.game_state = "red_spymaster";
+        } else {
+          newGame.game_state = "blue_spymaster";
+        }
+        setGame(newGame);
+        const result = await api.scoreSpymaster(newGame);
+        console.log(result);
+
       } else if (role === "Operative") {
+        const first_team = firstTeam === "Red" ? "red_spymaster" : "blue_spymaster";
+        const newGame = await api.createOperativeGame(cards.map(card => card.word), first_team, redHints, blueHints);
+        if (colour === "Red") {
+          newGame.game_state = "red_operative";
+        } else {
+          newGame.game_state = "blue_operative";
+        }
+        setGame(newGame);
+        const result = await api.scoreOperative(newGame);
+        console.log(result);
       }
     } else {
       setShowWarning(true);
@@ -93,7 +141,36 @@ function Board({ role }) {
           <Square key={i} card={card} onChange={(changes) => handleInput(i, changes)} />
         ))}
       </div>
-      {showWarning && <p style={{ color: "red", textAlign: "center" }}>Please fill in all words and identities.</p>}
+      {role === "Operative" && (
+        <div style={{ textAlign: "center", marginTop: "16px" }}>
+          <p>Current turn: <strong style={{ color: currentTurn === "Red" ? "#c0392b" : "#2980b9" }}>{currentTurn}</strong></p>
+          <input
+            type="text"
+            value={clueInput}
+            onChange={e => setClueInput(e.target.value)}
+            placeholder="Enter hint"
+            style={{ marginRight: "8px", padding: "6px", borderRadius: "4px" }}
+          />
+          <input
+            type="number"
+            value={numInput}
+            min={1}
+            max={13}
+            onChange={e => setNumInput(Number(e.target.value))}
+            style={{ width: "60px", marginRight: "8px", padding: "6px", borderRadius: "4px" }}
+          />
+          <button onClick={addHint} style={{ padding: "6px 16px", borderRadius: "4px", cursor: "pointer" }}>
+            Add Hint
+          </button>
+          <div style={{ marginTop: "8px" }}>
+            <strong>Red hints:</strong> {redHints.map(h => `${h.clue} (${h.num})`).join(", ")}
+          </div>
+          <div>
+            <strong>Blue hints:</strong> {blueHints.map(h => `${h.clue} (${h.num})`).join(", ")}
+          </div>
+        </div>
+      )}
+      {showWarning && <p style={{ color: "red", textAlign: "center" }}>Please fill in all cards.</p>}
       <div style={{ textAlign: "center", marginTop: "12px" }}>
         <button onClick={handleSubmit} style={{ padding: "10px 24px", fontSize: "16px", borderRadius: "6px", cursor: "pointer" }}>
           {role === "Spymaster" ? "Find Clue" : "Find Best Guess"}
@@ -105,22 +182,37 @@ function Board({ role }) {
 
 function App() {
   const [role, setRole] = useState<"Spymaster" | "Operative" | null>(null);
-
+  const [colour, setColour] = useState<"Red" | "Blue" | null>(null);
+  const [firstTeam, setFirstTeam] = useState<"Red" | "Blue" | null>(null);
   return (
     <div style={{ padding: "20px" }}>
       <div style={{ textAlign: "center", marginTop: "24px" }}>
         <h1 style={{ textAlign: "center" }}>CODENAMES SOLVER</h1>
         <p>Select your role:</p>
-        <button onClick={() => setRole("Spymaster")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer" }}>
+        <button onClick={() => setRole("Spymaster")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: role === "Spymaster" ? "#333333" : "", color: role === "Spymaster" ? "white" : "" }}>
           Spymaster
         </button>
-        <button onClick={() => setRole("Operative")} style={{ padding: "8px 20px", borderRadius: "6px", cursor: "pointer" }}>
+        <button onClick={() => setRole("Operative")} style={{ padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: role === "Operative" ? "#333333" : "", color: role === "Operative" ? "white" : "" }}>
           Operative
         </button>
-        {role && <p style={{ marginTop: "8px" }}>Current role: <strong>{role}</strong></p>}
+        <p>Select your colour:</p>
+        <button onClick={() => setColour("Red")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: colour === "Red" ? "#c0392b" : "", color: colour === "Red" ? "white" : "" }}>
+          Red
+        </button>
+        <button onClick={() => setColour("Blue")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: colour === "Blue" ? "#2980b9" : "", color: colour === "Blue" ? "white" : "" }}>
+          Blue
+        </button>
+        <p>Select the colour that starts:</p>
+        <button onClick={() => setFirstTeam("Red")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: firstTeam === "Red" ? "#c0392b" : "", color: firstTeam === "Red" ? "white" : "" }}>
+          Red
+        </button>
+        <button onClick={() => setFirstTeam("Blue")} style={{ marginRight: "8px", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", backgroundColor: firstTeam === "Blue" ? "#2980b9" : "", color: firstTeam === "Blue" ? "white" : "" }}>
+          Blue
+        </button>
+        {role && <p style={{ marginTop: "8px" }}>Current role: <strong>{colour}</strong> <strong>{role}</strong></p>}
       </div>
       
-      <Board role={role} />
+      <Board role={role} colour={colour} firstTeam={firstTeam}/>
 
     </div>
   );

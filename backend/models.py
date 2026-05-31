@@ -18,7 +18,6 @@ class Card(BaseModel):
 class Hint(BaseModel):
     clue: str
     num: int
-    guesses: list[str]
 
 
 class GameState(Enum):
@@ -40,3 +39,5 @@ class CreateSpymasterGameRequest(BaseModel):
 class CreateOperativeGameRequest(BaseModel):
     words: list[str]
     first_team: GameState
+    red_hints: list[Hint]
+    blue_hints: list[Hint]

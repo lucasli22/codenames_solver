@@ -1,4 +1,4 @@
-import type { Card, Game } from "./types";
+import type { Card, Game, Hint } from "./types";
 
 const BASE_URL = "http://localhost:8000";
 
@@ -35,8 +35,9 @@ export const api = {
   createSpymasterGame: (words: Card[]) =>
     request<Game>("/game/spymaster", { words }),
 
-  createOperativeGame: (words: string[], first_team: "red_spymaster" | "blue_spymaster") =>
-    request<Game>("/game/operative", { words, first_team }),
+  createOperativeGame: (words: string[], first_team: "red_spymaster" | "blue_spymaster", 
+    red_hints: Hint[], blue_hints: Hint[]) =>
+    request<Game>("/game/operative", { words, first_team, red_hints, blue_hints }),
 
   scoreSpymaster: (game: Game) =>
     request<{ identity: string; clue: SpymasterHint[] }>("/game/score/spymaster", game),

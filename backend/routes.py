@@ -57,7 +57,7 @@ def create_game_operative(request: CreateOperativeGameRequest):
             index += 1
         board.append(row)
 
-    return Game(board=board, game_state=request.first_team, red_hints=[], blue_hints=[])
+    return Game(board=board, game_state=request.first_team, red_hints=request.red_hints, blue_hints=request.blue_hints)
 
 @router.post("/game/score/operative")
 def get_score_operative(game: Game):
@@ -75,8 +75,8 @@ def get_score_operative(game: Game):
     adjusted_matrix, results = operative_scorer(words, ally_hints, enemey_hints)
 
     return {
-        "rankings": [{"word": w, "score": s} for s, w in adjusted_matrix],
-        "per_hint": {clue: [{"word": w, "score": s} for s, w in matches] for clue, matches in results.items()}
+        "rankings": [{"word": w, "score": float(s)} for s, w in adjusted_matrix],
+        "per_hint": {clue: [{"word": w, "score": float(s)} for s, w in matches] for clue, matches in results.items()}
     }
 
 

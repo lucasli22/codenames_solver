@@ -34,7 +34,7 @@ TEST_WORDS = [
 ]
 
 TEST_ALLY_HINTS = [
-    Hint(clue="chuck", num=3, guesses=[]),
+    Hint(clue="chuck", num=3),
 ]
 
 TEST_ENEMY_HINTS = [

@@ -12,7 +12,6 @@ export interface Card {
 export interface Hint {
     clue: string;
     num: number;
-    guesses: string[]
 }
 
 export interface Game {
