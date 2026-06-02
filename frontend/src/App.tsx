@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "./api";
+import type { SpymasterHint, OperativeRanking } from "./api";
+import type { Game, Card } from "./types";
 
 const identityColors: Record<string, string> = {
   red_agent: "#c0392b",
@@ -10,6 +12,75 @@ const identityColors: Record<string, string> = {
 };
 
 type CardState = { word: string; identity: string | null; is_revealed: boolean };
+type Role = "Spymaster" | "Operative" | null;
+type Colour = "Red" | "Blue" | null;
+type HintState = { clue: string; num: number };
+
+function ResultPanel({ role, result, perHint, open, onClose }: {
+  role: Role;
+  result: SpymasterHint[] | OperativeRanking[] | null;
+  perHint: Record<string, OperativeRanking[]> | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed",
+      top: 0, right: 0,
+      height: "100vh",
+      width: "320px",
+      backgroundColor: "#1e1e1e",
+      color: "white",
+      transform: open ? "translateX(0)" : "translateX(100%)",
+      transition: "transform 0.3s ease",
+      boxShadow: "-4px 0 20px rgba(0,0,0,0.4)",
+      display: "flex",
+      flexDirection: "column",
+      zIndex: 1000,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px", borderBottom: "1px solid #333" }}>
+        <h2 style={{ margin: 0, fontSize: "18px" }}>Results</h2>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "white", fontSize: "20px", cursor: "pointer" }}>✕</button>
+      </div>
+      <div style={{ overflowY: "auto", flex: 1, padding: "16px" }}>
+        {role === "Spymaster" && Array.isArray(result) && (result as SpymasterHint[]).map((h, i) => (
+          <div key={i} style={{ backgroundColor: "#2a2a2a", borderRadius: "8px", padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <span style={{ fontWeight: "bold", fontSize: "16px" }}>{h.hint}</span>
+              <span style={{ marginLeft: "8px", backgroundColor: "#444", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>{h.k}</span>
+            </div>
+            <span style={{ color: "#aaa", fontSize: "12px" }}>{h.utility.toFixed(2)}</span>
+          </div>
+        ))}
+        {role === "Operative" && Array.isArray(result) && (
+          <>
+            <p style={{ color: "#aaa", fontSize: "12px", marginTop: 0 }}>Overall rankings</p>
+            {(result as OperativeRanking[]).map((r, i) => (
+              <div key={i} style={{ backgroundColor: "#2a2a2a", borderRadius: "8px", padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <span style={{ color: "#555", fontSize: "12px" }}>#{i + 1}</span>
+                  <span style={{ fontWeight: "bold" }}>{r.word}</span>
+                </div>
+                <span style={{ color: r.score > 0 ? "#2ecc71" : "#e74c3c", fontSize: "12px" }}>{r.score.toFixed(3)}</span>
+              </div>
+            ))}
+            {perHint && Object.entries(perHint).map(([clue, words]) => (
+              <div key={clue} style={{ marginTop: "16px" }}>
+                <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "6px" }}>Clue: <strong style={{ color: "white" }}>{clue}</strong></p>
+                {words.map((r, i) => (
+                  <div key={i} style={{ backgroundColor: "#2a2a2a", borderRadius: "8px", padding: "10px", marginBottom: "6px", display: "flex", justifyContent: "space-between" }}>
+                    <span>{r.word}</span>
+                    <span style={{ color: "#aaa", fontSize: "12px" }}>{r.score.toFixed(3)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function Square({ card, onChange }: { card: CardState; onChange: (changes: Partial<CardState>) => void }) {
   const bg = identityColors[card.identity ?? ""];
@@ -64,17 +135,20 @@ function Square({ card, onChange }: { card: CardState; onChange: (changes: Parti
   );
 }
 
-function Board({ role, colour, firstTeam }) {
-  const [cards, setCards] = useState(Array(25).fill(null).map(() => ({
+function Board({ role, colour, firstTeam }: { role: Role; colour: Colour; firstTeam: Colour }) {
+  const [cards, setCards] = useState<CardState[]>(Array(25).fill(null).map(() => ({
     word: "", identity: null, is_revealed: false,
   })));
   const [showWarning, setShowWarning] = useState(false);
-  const [game, setGame] = useState(null);
-  const [redHints, setRedHints] = useState<{clue: string, num: number}[]>([]);
-  const [blueHints, setBlueHints] = useState<{clue: string, num: number}[]>([]);
+  const [game, setGame] = useState<Game | null>(null);
+  const [redHints, setRedHints] = useState<HintState[]>([]);
+  const [blueHints, setBlueHints] = useState<HintState[]>([]);
   const [clueInput, setClueInput] = useState("");
   const [numInput, setNumInput] = useState(1);
-  const [currentTurn, setCurrentTurn] = useState<"Red" | "Blue" | null>(null);
+  const [currentTurn, setCurrentTurn] = useState<Colour>(null);
+  const [result, setResult] = useState<SpymasterHint[] | OperativeRanking[] | null>(null);
+  const [perHint, setPerHint] = useState<Record<string, OperativeRanking[]> | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   useEffect(() => {
     setCurrentTurn(firstTeam);
@@ -82,60 +156,53 @@ function Board({ role, colour, firstTeam }) {
 
   function addHint() {
     const hint = { clue: clueInput, num: numInput };
-    if (!clueInput) return;
-    if (!(/^[a-zA-Z]+$/.test(clueInput))) return;
-    
-    if (currentTurn == "Red") {
+    if (!clueInput || !(/^[a-zA-Z]+$/.test(clueInput))) return;
+    if (currentTurn === "Red") {
       setRedHints([...redHints, hint]);
     } else {
       setBlueHints([...blueHints, hint]);
     }
-
     setClueInput("");
     setCurrentTurn(currentTurn === "Red" ? "Blue" : "Red");
   }
 
-
-  function handleInput(i: number, changes: Partial<typeof cards[0]>) {
+  function handleInput(i: number, changes: Partial<CardState>) {
     setCards(cards.map((card, index) => index === i ? { ...card, ...changes } : card));
   }
 
   async function handleSubmit() {
-    const valid = role === "Spymaster" ? cards.every(card => card.word !== "" && card.identity != null) : 
-    cards.every(card => card.word !== "");
+    const valid = role === "Spymaster"
+      ? cards.every(card => card.word !== "" && card.identity != null)
+      : cards.every(card => card.word !== "");
 
-    if (valid) {
-      setShowWarning(false);
-      if (role === "Spymaster") {
-        const newGame = await api.createSpymasterGame(cards);
-        if (colour === "Red") {
-          newGame.game_state = "red_spymaster";
-        } else {
-          newGame.game_state = "blue_spymaster";
-        }
-        setGame(newGame);
-        const result = await api.scoreSpymaster(newGame);
-        console.log(result);
-
-      } else if (role === "Operative") {
-        const first_team = firstTeam === "Red" ? "red_spymaster" : "blue_spymaster";
-        const newGame = await api.createOperativeGame(cards.map(card => card.word), first_team, redHints, blueHints);
-        if (colour === "Red") {
-          newGame.game_state = "red_operative";
-        } else {
-          newGame.game_state = "blue_operative";
-        }
-        setGame(newGame);
-        const result = await api.scoreOperative(newGame);
-        console.log(result);
-      }
-    } else {
+    if (!valid) {
       setShowWarning(true);
+      return;
+    }
+
+    setShowWarning(false);
+    if (role === "Spymaster") {
+      const newGame = await api.createSpymasterGame(cards as Card[]);
+      newGame.game_state = colour === "Red" ? "red_spymaster" : "blue_spymaster";
+      setGame(newGame);
+      const res = await api.scoreSpymaster(newGame);
+      setResult(res.clue);
+      setPanelOpen(true);
+    } else if (role === "Operative") {
+      const first_team = firstTeam === "Red" ? "red_spymaster" : "blue_spymaster";
+      const newGame = await api.createOperativeGame(cards.map(card => card.word), first_team, redHints, blueHints);
+      newGame.game_state = colour === "Red" ? "red_operative" : "blue_operative";
+      setGame(newGame);
+      const res = await api.scoreOperative(newGame);
+      setResult(res.rankings);
+      setPerHint(res.per_hint);
+      setPanelOpen(true);
     }
   }
 
   return (
     <>
+      <ResultPanel role={role} result={result} perHint={perHint} open={panelOpen} onClose={() => setPanelOpen(false)} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px", padding: "16px" }}>
         {cards.map((card, i) => (
           <Square key={i} card={card} onChange={(changes) => handleInput(i, changes)} />
@@ -181,9 +248,9 @@ function Board({ role, colour, firstTeam }) {
 }
 
 function App() {
-  const [role, setRole] = useState<"Spymaster" | "Operative" | null>(null);
-  const [colour, setColour] = useState<"Red" | "Blue" | null>(null);
-  const [firstTeam, setFirstTeam] = useState<"Red" | "Blue" | null>(null);
+  const [role, setRole] = useState<Role>(null);
+  const [colour, setColour] = useState<Colour>(null);
+  const [firstTeam, setFirstTeam] = useState<Colour>(null);
   return (
     <div style={{ padding: "20px" }}>
       <div style={{ textAlign: "center", marginTop: "24px" }}>
@@ -211,9 +278,8 @@ function App() {
         </button>
         {role && <p style={{ marginTop: "8px" }}>Current role: <strong>{colour}</strong> <strong>{role}</strong></p>}
       </div>
-      
-      <Board role={role} colour={colour} firstTeam={firstTeam}/>
 
+      <Board role={role} colour={colour} firstTeam={firstTeam} />
     </div>
   );
 }
